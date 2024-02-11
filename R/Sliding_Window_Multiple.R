@@ -2,7 +2,7 @@ Sliding_Window_Multiple <- function(chr,start_loc,end_loc,sliding_window_length=
                                     QC_label="annotation/filter",variant_type=c("SNV","Indel","variant"),geno_missing_imputation=c("mean","minor"),
                                     Annotation_dir="annotation/info/FunctionalAnnotation",Annotation_name_catalog,
                                     Use_annotation_weights=c(TRUE,FALSE),Annotation_name=NULL,
-                                    SPA_p_filter=FALSE,p_filter_cutoff=0.05,silent=FALSE){
+                                    SPA_p_filter=FALSE,p_filter_cutoff=0.05,silent=FALSE, vaf=0.35,dp=10,gq=80){
 
 	## evaluate choices
 	variant_type <- match.arg(variant_type)
@@ -65,7 +65,7 @@ Sliding_Window_Multiple <- function(chr,start_loc,end_loc,sliding_window_length=
 	if(sum(is.in)>=2)
 	{
 		## Genotype
-		Geno <- seqGetData(genofile, "$dosage")
+	  Geno <- seqGetData(genofile, "$dosage_alt")
 		Geno <- Geno[id.genotype.match,,drop=FALSE]
 
 		## impute missing
@@ -73,14 +73,40 @@ Sliding_Window_Multiple <- function(chr,start_loc,end_loc,sliding_window_length=
 		{
 			if(dim(Geno)[2]>0)
 			{
-				if(geno_missing_imputation=="mean")
-				{
-					Geno <- matrix_flip_mean(Geno)$Geno
-				}
-				if(geno_missing_imputation=="minor")
-				{
-					Geno <- matrix_flip_minor(Geno)$Geno
-				}
+			  flip = flip_alleles(Geno, snps = 'cols')
+			  Geno.flip <- flip$dosmat
+			  flipped_loci <- flip$flipped_loci
+			  ## filtering for VAF,GQ,DP
+			  VAF <- seqGetData(genofile, 'annotation/format/VAF')
+			  VAF <- VAF[id.genotype.match, , drop = FALSE]
+			  # for flipped loci, ref is minor allele
+			  # need to correct VAF accordingly
+			  if(!is.null(flipped_loci)){
+			    VAF[, flipped_loci] <- 1 - VAF[, flipped_loci]
+			  }
+			  GQ <- seqGetData(genofile, 'annotation/format/GQ')
+			  GQ <- GQ[id.genotype.match, , drop = FALSE]
+			  DP <- seqGetData(genofile, 'annotation/format/DP')
+			  DP <- DP[id.genotype.match, , drop = FALSE]
+			  QC <- (VAF >= vaf) & GQ >= gq & DP >= dp
+			  isgt0 <- Geno.flip > 0
+			  # non-reference GTs (i.e. 1,2) are set to zero
+			  # if they fail defined QC; NA: because it wont
+			  # affect MAF calculation by staar.
+			  Geno.adj <-
+			    ifelse(QC == FALSE & isgt0 == TRUE, NA , Geno.flip)
+
+			  if (geno_missing_imputation == "mean") {
+			    imputed <- matrix_flip_mean(Geno.adj)
+			    Geno <- imputed$Geno
+			    MAF <- imputed$MAF
+			    ## Geno downstream Imput
+			    Geno.adj.imp <- Geno
+			  }
+			  if (geno_missing_imputation == "minor") {
+			    Geno <- matrix_flip_minor(Geno)$Geno
+			  }
+
 			}
 		}
 
