@@ -71,7 +71,7 @@ Dynamic_Window_SCANG <- function(chr,start_loc,end_loc,genofile,obj_nullmodel,
                                  p_filter=1e-8,f=0,alpha=0.1,
                                  QC_label="annotation/filter",variant_type=c("SNV","Indel","variant"),geno_missing_imputation=c("mean","minor"),
                                  Annotation_dir="annotation/info/FunctionalAnnotation",Annotation_name_catalog,
-                                 Use_annotation_weights=c(TRUE,FALSE),Annotation_name=NULL,silent=FALSE){
+                                 Use_annotation_weights=c(TRUE,FALSE),Annotation_name=NULL,silent=FALSE, vaf=0.35,dp=10,gq=80){
 
 	## evaluate choices
 	variant_type <- match.arg(variant_type)
@@ -159,7 +159,7 @@ Dynamic_Window_SCANG <- function(chr,start_loc,end_loc,genofile,obj_nullmodel,
 		id.genotype.match <- phenotype.id.merge$index
 
 		## Genotype
-		Geno <- seqGetData(genofile, "$dosage")
+		Geno <- seqGetData(genofile, "$dosage_alt")
 		Geno <- Geno[id.genotype.match,,drop=FALSE]
 
 		## impute missing
@@ -167,17 +167,39 @@ Dynamic_Window_SCANG <- function(chr,start_loc,end_loc,genofile,obj_nullmodel,
 		{
 			if(dim(Geno)[2]>0)
 			{
+			  flip = flip_alleles(Geno, snps = 'cols')
+			  Geno.flip <- flip$dosmat
+			  flipped_loci <- flip$flipped_loci
+			  ## filtering for VAF,GQ,DP
+			  VAF <- seqGetData(genofile, 'annotation/format/VAF')
+			  VAF <- VAF[id.genotype.match, , drop = FALSE]
+			  # for flipped loci, ref is minor allele
+			  # need to correct VAF accordingly
+			  if(!is.null(flipped_loci)){
+			    VAF[, flipped_loci] <- 1 - VAF[, flipped_loci]
+			  }
+			  GQ <- seqGetData(genofile, 'annotation/format/GQ')
+			  GQ <- GQ[id.genotype.match, , drop = FALSE]
+			  DP <- seqGetData(genofile, 'annotation/format/DP')
+			  DP <- DP[id.genotype.match, , drop = FALSE]
+			  QC <- (VAF >= vaf) & GQ >= gq & DP >= dp
+			  isgt0 <- Geno.flip > 0
+			  # non-reference GTs (i.e. 1,2) are set to zero
+			  # if they fail defined QC; NA: because it wont
+			  # affect MAF calculation by staar.
+			  Geno.adj <-
+			    ifelse(QC == FALSE & isgt0 == TRUE, NA , Geno.flip)
 				if(geno_missing_imputation=="mean")
 				{
-					Geno <- matrix_flip_mean(Geno)
-					MAF <- Geno$MAF
-					Geno <- Geno$Geno
+				  imputed <- matrix_flip_mean(Geno.adj)
+				  Geno <- imputed$Geno
+				  MAF <- imputed$MAF
 				}
 				if(geno_missing_imputation=="minor")
 				{
-					Geno <- matrix_flip_minor(Geno)
-					MAF <- Geno$MAF
-					Geno <- Geno$Geno
+				  imputed <- matrix_flip_minor(Geno.adj)
+				  Geno <- imputed$Geno
+				  MAF <- imputed$MAF
 				}
 			}
 		}
