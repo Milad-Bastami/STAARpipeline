@@ -28,7 +28,11 @@ Get_Sliding_Geno <-
            dp = 10,
            gq = 80,
            save_df=TRUE,
-           out_dir) {
+           out_dir,
+           case_idx=1:1644,
+           control_idx = 1645:4849,
+           doSKAT=FALSE,
+           skatNULL=NULL) {
 
   ## evaluate choices
   variant_type <- match.arg(variant_type)
@@ -105,7 +109,8 @@ Get_Sliding_Geno <-
         # if they fail defined QC; NA: because it wont
         # affect MAF calculation by staar.
         Geno.adj <-
-          ifelse(QC == FALSE & isgt0 == TRUE, NA , Geno.flip)
+          ifelse(QC == FALSE & isgt0 == TRUE, 0 , Geno.flip)
+        Geno.adj <- ifelse(is.na(Geno.adj), 0, Geno.adj)
 
         if (geno_missing_imputation == "mean") {
           imputed <- matrix_flip_mean(Geno.adj)
@@ -121,6 +126,32 @@ Get_Sliding_Geno <-
         variant.id.rare <- seqGetData(genofile, 'variant.id')
         variant.id.rare <- variant.id.rare[is.in.rare]
         seqSetFilter(genofile, variant.id = variant.id.rare)
+
+        ## perform SKAT test
+        if(doSKAT) {
+          skat = SKAT::SKATBinary(as.matrix(Geno.adj),
+                                  get(skatNULL),
+                                  method = 'Burden')
+          skat_res <- cbind.data.frame(
+            window = paste0("chr", chr, "_", start_loc, "_", end_loc),
+            pval_SKATbin_burden = skat$p.value,
+            SKATbin_burden_n.test = skat$param$n.marker.test,
+            SKATbin_burden_n.marker = skat$param$n.marker,
+            MAC = skat$MAC
+          )
+          fname = paste0(out_dir, "/chr",chr,"_",start_loc,"_",end_loc,"_skat.txt")
+          write.table(
+            skat_res,
+            file = fname,
+            sep = '\t',
+            row.names = F,
+            col.names = T,
+            quote = F
+          )
+          rm(list = c('fname', 'skat_res', 'skat'))
+          gc()
+
+        }
       }
     }
 
@@ -204,7 +235,7 @@ Get_Sliding_Geno <-
       rm(list ='flipped_loci')
       gc()
       # ISKS variant freq
-      Geno.adj.isks <- Geno.adj[1:1644, , drop = FALSE]
+      Geno.adj.isks <- Geno.adj[case_idx, , drop = FALSE]
       df_var$isks_acM = apply(Geno.adj.isks, 2, function(x)
         (2 * sum(x == 0L, na.rm = T)) + sum(x == 1L, na.rm = T))
       df_var$isks_acm = apply(Geno.adj.isks, 2, function(x)
@@ -220,7 +251,7 @@ Get_Sliding_Geno <-
         sum(x == 2L, na.rm = T))
 
       ## MGRB variant freq
-      Geno.adj.mgrb <- Geno.adj[1645:4849, , drop = FALSE]
+      Geno.adj.mgrb <- Geno.adj[control_idx, , drop = FALSE]
       df_var$mgrb_acM = apply(Geno.adj.mgrb, 2, function(x)
         (2 * sum(x == 0L, na.rm = T)) + sum(x == 1L, na.rm = T))
       df_var$mgrb_acm = apply(Geno.adj.mgrb, 2, function(x)
